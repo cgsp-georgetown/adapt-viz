@@ -315,6 +315,72 @@ for df, label, color in zip(county_long_dfs, labels, COLORS):
 
 st.plotly_chart(fig3, width="stretch")
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Chart 4 – Combined Wages & Employment
+# ─────────────────────────────────────────────────────────────────────────────
+st.subheader("Non-College Median Wage & Employment (Combined)")
+
+fig4 = go.Figure()
+fig4.update_layout(
+    **SHARED_LAYOUT,
+    title=dict(
+        text="Non-College Median Wage & Employment by County",
+        x=0.5, y=0.94, xanchor="center", yanchor="top",
+        font=dict(size=21, color="black", family=ROBOTO),
+    ),
+    yaxis=dict(
+        title=dict(text="Median Wage ($)", font=dict(color="black", size=20, family=ROBOTO_MED)),
+        title_standoff=25,
+        dtick=2500,
+        tickfont=dict(color="black", size=18, family=ROBOTO),
+        tickformat="$,.0f",
+    ),
+    yaxis2=dict(
+        title=dict(text="Number Non-College Educated Working", font=dict(color="black", size=20, family=ROBOTO_MED)),
+        title_standoff=25,
+        tickfont=dict(color="black", size=18, family=ROBOTO),
+        tickformat=",",
+        overlaying="y",
+        side="right",
+    ),
+    legend=dict(
+        orientation="h",
+        x=0.5, xanchor="center",
+        y=-0.55, yanchor="top",
+        entrywidth=220,
+        **SHARED_LEGEND,
+    ),
+)
+fig4.update_layout(margin=dict(t=110, r=155, l=155, b=120))
+apply_xaxis(fig4)
+fig4.add_shape(**IMPORT_SHOCK)
+fig4.add_annotation(**IMPORT_LABEL)
+
+for df, label, color in zip(county_long_dfs, labels, COLORS):
+    if df.empty:
+        continue
+    if "star_median" in df.columns:
+        fig4.add_trace(go.Scatter(
+            x=df["year"],
+            y=df["star_median"],
+            mode="lines",
+            line=dict(color=color, width=3, dash="solid"),
+            name=f"{label}  Wage",
+            yaxis="y1",
+        ))
+    if "employed_STARs" in df.columns:
+        fig4.add_trace(go.Scatter(
+            x=df["year"],
+            y=df["employed_STARs"],
+            mode="lines",
+            line=dict(color=color, width=3, dash="dot"),
+            name=f"{label}  Employment",
+            yaxis="y2",
+        ))
+
+st.plotly_chart(fig4, width="stretch")
+st.caption("Solid lines = Median Wage (left axis)  ·  Dotted lines = Employment (right axis)")
+
 # Expandable section displaying raw data for selected counties
 with st.expander(" Show raw data for selected counties"):
     for df, label in zip(county_long_dfs, labels):

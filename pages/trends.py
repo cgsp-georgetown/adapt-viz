@@ -13,6 +13,9 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import json
 from urllib.request import urlopen
+import streamlit.components.v1 as components
+from arcgis.gis import GIS
+from arcgis.features import FeatureLayer
 
 st.set_page_config(page_title="Trends Analysis", page_icon="📈", layout="wide")
 
@@ -32,11 +35,34 @@ def load_data():
     long_df = pd.read_csv("county_all_vars_post_index.csv")
     return national_df, long_df
 
+@st.cache_data
+def load_grad_data():
+    df = pd.read_stata("county_panel_90001122.dta")
+    df2022 = df[df["year"] == 2022].copy()
+    df2022["county_fips"] = df2022["county_fips"].astype("Int64")
+    grads = df2022.groupby("county_fips").apply(
+        lambda g: pd.Series({
+            "total_fouryear_grads_2022": g.loc[g["level"] == "4+ years", "numbergraduates"].sum(),
+            "total_subba_grads_2022":    g.loc[g["level"] != "4+ years", "numbergraduates"].sum(),
+        })
+    ).reset_index()
+    return grads
+
 national_df, long_df = load_data()
+grad_df = load_grad_data()
 
 # Remove CT planning regions
 _ct_mask = national_df["county_name"].str.contains("Planning Region", case=False, na=False)
 national_df = national_df[~_ct_mask].copy()
+
+# Merge grad totals and normalise by working-age population
+_grad_map_cols = grad_df[["county_fips", "total_fouryear_grads_2022", "total_subba_grads_2022"]].copy()
+_grad_map_cols["county_fips"] = _grad_map_cols["county_fips"].astype(float)
+national_df = national_df.merge(_grad_map_cols, left_on="countyid", right_on="county_fips", how="left").drop(columns="county_fips")
+national_df["total_fouryear_grads_2022"] = national_df["total_fouryear_grads_2022"].fillna(0)
+national_df["total_subba_grads_2022"]    = national_df["total_subba_grads_2022"].fillna(0)
+national_df["fouryear_grads_per_wap_2022"] = national_df["total_fouryear_grads_2022"] / national_df["workagepop2022"].replace(0, float("nan"))
+national_df["subba_grads_per_wap_2022"]    = national_df["total_subba_grads_2022"]    / national_df["workagepop2022"].replace(0, float("nan"))
 
 # Assign China shock quartiles (fixed per county, normalized by county size)
 _county_shock = long_df.groupby("countyid").agg(
@@ -71,6 +97,8 @@ _NAT_MAP_METRICS = {
     "Education Spending (% Local Budget, 2022)": ("educ_pct_total_stloc2022", 100,   ",.1f"),
     "Per-Pupil Spending (2022)":                 ("spend_ppupil_2022",          1,   "$,.0f"),
     "Tradable Services Job Growth (2017–2022)":  ("tradserv_exp_emp_2017_2022", 1,   ",.0f"),
+    "4-Year Graduates per Working-Age Pop. (2022)":         ("fouryear_grads_per_wap_2022", 1, ",.4f"),
+    "Sub-Bachelor's Graduates per Working-Age Pop. (2022)": ("subba_grads_per_wap_2022",    1, ",.4f"),
 }
 
 _nat_label = st.selectbox("Select metric to map", list(_NAT_MAP_METRICS.keys()), key="nat_map_metric")
@@ -130,6 +158,8 @@ _CZ_MAP_METRICS = {
     "Education Spending (% Local Budget, 2022)": ("educ_pct_total_stloc2022",  100,   ",.1f",  "mean"),
     "Per-Pupil Spending (2022)":                 ("spend_ppupil_2022",           1,   "$,.0f", "mean"),
     "Tradable Services Job Growth (2017–2022)":  ("tradserv_exp_emp_2017_2022",  1,   ",.0f",  "sum"),
+    "4-Year Graduates per Working-Age Pop. (2022)":         ("fouryear_grads_per_wap_2022", 1, ",.4f", "mean"),
+    "Sub-Bachelor's Graduates per Working-Age Pop. (2022)": ("subba_grads_per_wap_2022",    1, ",.4f", "mean"),
 }
 
 st.subheader("Commuting Zone Map")
@@ -191,6 +221,190 @@ fig_cz.update_layout(
 )
 st.plotly_chart(fig_cz, width="stretch")
 st.caption("Counties shaded by their commuting zone's aggregated value. Wages and rates are averaged across counties; employment counts are summed.")
+
+# ── ArcGIS Map — County Boundaries + Overlays + Highway Network ──────────────
+st.subheader("ArcGIS Map — County Boundaries, Economic Distress & Highway Network")
+
+# Public service URLs
+_COUNTY_SVC     = "https://services.arcgis.com/P3ePLMYs2RVChkJx/arcgis/rest/services/USA_Counties_Generalized/FeatureServer/0"
+_INTERSTATE_SVC = "https://services.arcgis.com/P3ePLMYs2RVChkJx/arcgis/rest/services/USA_Freeway_System/FeatureServer/1"
+_STATE_HWY_SVC  = "https://services.arcgis.com/P3ePLMYs2RVChkJx/arcgis/rest/services/USA_Freeway_System/FeatureServer/2"
+# Community Economic Distress Index — public Feature Service (item 4ccbeee3fdbb4d7ca9e8d991d240a416)
+_DCI_SVC        = "https://services8.arcgis.com/cOQY5d2zYaXw1BYI/arcgis/rest/services/Community_Economic_Distress_Index/FeatureServer/0"
+
+@st.cache_resource
+def _get_arcgis_layer_urls():
+    """Connect anonymously and return validated FeatureLayer service URLs."""
+    gis = GIS()
+    return (
+        FeatureLayer(_COUNTY_SVC,     gis=gis).url,
+        FeatureLayer(_INTERSTATE_SVC, gis=gis).url,
+        FeatureLayer(_STATE_HWY_SVC,  gis=gis).url,
+        FeatureLayer(_DCI_SVC,        gis=gis).url,
+    )
+
+_county_url, _interstate_url, _state_hwy_url, _dci_url = _get_arcgis_layer_urls()
+
+# Mfg employment decline (mfgsh2011 - mfgsh1991) × 100, keyed by 5-digit FIPS string
+_mfg_cols = national_df[["countyid", "mfgsh1991", "mfgsh2011"]].dropna()
+_mfg_decline_json = json.dumps({
+    f"{int(r.countyid):05d}": round((r.mfgsh2011 - r.mfgsh1991) * 100, 2)
+    for _, r in _mfg_cols.iterrows()
+})
+
+def _arcgis_map_html(county_url, interstate_url, state_hwy_url, dci_url, mfg_json):
+    return f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8" />
+      <meta name="viewport" content="initial-scale=1, maximum-scale=1, user-scalable=no" />
+      <link rel="stylesheet" href="https://js.arcgis.com/4.29/esri/themes/light/main.css" />
+      <script src="https://js.arcgis.com/4.29/"></script>
+      <style>
+        html, body, #viewDiv {{ margin: 0; padding: 0; height: 640px; width: 100%; }}
+      </style>
+    </head>
+    <body>
+      <div id="viewDiv"></div>
+      <script>
+        require([
+          "esri/Map",
+          "esri/views/MapView",
+          "esri/layers/FeatureLayer",
+          "esri/layers/GeoJSONLayer",
+          "esri/widgets/Legend",
+          "esri/widgets/LayerList",
+          "esri/widgets/ScaleBar"
+        ], function(Map, MapView, FeatureLayer, GeoJSONLayer, Legend, LayerList, ScaleBar) {{
+
+          // ── Mfg decline data (Python-computed, keyed by 5-digit FIPS) ──────
+          var mfgData = {mfg_json};
+
+          // ── Community Economic Distress Index (tract-level Feature Service) ─
+          var dciLayer = new FeatureLayer({{
+            url: "{dci_url}",
+            title: "Community Economic Distress Index",
+            opacity: 0.70,
+            renderer: {{
+              type: "class-breaks",
+              field: "INDEX_PCTL",
+              legendOptions: {{ title: "Distress Index Percentile" }},
+              classBreakInfos: [
+                {{ minValue: 0,  maxValue: 20,  label: "0–20 (Least Distressed)",  symbol: {{ type: "simple-fill", color: [255, 255, 178, 160], outline: {{ width: 0 }} }} }},
+                {{ minValue: 20, maxValue: 40,  label: "20–40",                    symbol: {{ type: "simple-fill", color: [254, 204,  92, 160], outline: {{ width: 0 }} }} }},
+                {{ minValue: 40, maxValue: 60,  label: "40–60",                    symbol: {{ type: "simple-fill", color: [253, 141,  60, 170], outline: {{ width: 0 }} }} }},
+                {{ minValue: 60, maxValue: 80,  label: "60–80",                    symbol: {{ type: "simple-fill", color: [240,  59,  32, 180], outline: {{ width: 0 }} }} }},
+                {{ minValue: 80, maxValue: 100, label: "80–100 (Most Distressed)", symbol: {{ type: "simple-fill", color: [189,   0,  38, 190], outline: {{ width: 0 }} }} }}
+              ]
+            }},
+            popupTemplate: {{
+              title: "{{County_Name}}, {{ST_ABBREV}}",
+              content: [{{ type: "fields", fieldInfos: [
+                {{ fieldName: "INDEX_",               label: "Distress Index Score"    }},
+                {{ fieldName: "INDEX_PCTL",            label: "Distress Percentile"    }},
+                {{ fieldName: "Percent_below_poverty", label: "% Below Poverty"        }},
+                {{ fieldName: "Percent_unemployed",    label: "% Unemployed"           }},
+                {{ fieldName: "Percent_less_than_HighSchool", label: "% < High School" }}
+              ]}}]
+            }}
+          }});
+
+          // ── County boundary outline layer ────────────────────────────────────
+          var countyLayer = new FeatureLayer({{
+            url: "{county_url}",
+            title: "County Boundaries",
+            renderer: {{
+              type: "simple",
+              symbol: {{ type: "simple-fill", color: [0,0,0,0], outline: {{ color: [70,70,70,200], width: 0.5 }} }}
+            }},
+            popupTemplate: {{ title: "{{NAME}}, {{STATE_NAME}}" }}
+          }});
+
+          // ── Interstate highways ───────────────────────────────────────────────
+          var interstateLayer = new FeatureLayer({{
+            url: "{interstate_url}",
+            title: "Interstates",
+            renderer: {{ type: "simple", symbol: {{ type: "simple-line", color: [210, 35, 35], width: 1.8 }} }},
+            popupTemplate: {{ title: "Interstate {{ROUTE_NUM}}" }}
+          }});
+
+          // ── State highways ────────────────────────────────────────────────────
+          var stateHwyLayer = new FeatureLayer({{
+            url: "{state_hwy_url}",
+            title: "State Highways",
+            renderer: {{ type: "simple", symbol: {{ type: "simple-line", color: [220, 140, 0], width: 1.1 }} }},
+            popupTemplate: {{ title: "State Hwy {{ROUTE_NUM}}" }}
+          }});
+
+          // ── Map + view (without mfg layer yet — added after async fetch) ─────
+          var map = new Map({{
+            basemap: "gray-vector",
+            layers: [dciLayer, countyLayer, stateHwyLayer, interstateLayer]
+          }});
+
+          var view = new MapView({{
+            container: "viewDiv",
+            map: map,
+            center: [-98.5, 39.5],
+            zoom: 4
+          }});
+
+          // ── Mfg decline GeoJSONLayer (county-level, injected from Python) ────
+          var COUNTY_GEOJSON_URL = "https://raw.githubusercontent.com/plotly/datasets/master/geojson-counties-fips.json";
+          fetch(COUNTY_GEOJSON_URL)
+            .then(function(r) {{ return r.json(); }})
+            .then(function(geojson) {{
+              geojson.features.forEach(function(f) {{
+                var fips = String(f.id).padStart(5, "0");
+                f.properties.mfg_decline = (mfgData[fips] !== undefined) ? mfgData[fips] : null;
+              }});
+              var blob = new Blob([JSON.stringify(geojson)], {{ type: "application/geo+json" }});
+              var mfgLayer = new GeoJSONLayer({{
+                url: URL.createObjectURL(blob),
+                title: "Mfg. Employment Decline 1991–2011 (pp)",
+                opacity: 0.65,
+                renderer: {{
+                  type: "class-breaks",
+                  field: "mfg_decline",
+                  legendOptions: {{ title: "Mfg Share Change (pp)" }},
+                  defaultSymbol: {{ type: "simple-fill", color: [210,210,210,80], outline: {{ width: 0 }} }},
+                  defaultLabel: "No data",
+                  classBreakInfos: [
+                    {{ minValue: -100, maxValue: -20, label: "< −20 pp (Severe)",  symbol: {{ type: "simple-fill", color: [165, 15, 21, 200], outline: {{ width: 0 }} }} }},
+                    {{ minValue:  -20, maxValue: -10, label: "−20 to −10 pp",      symbol: {{ type: "simple-fill", color: [222, 45, 38, 180], outline: {{ width: 0 }} }} }},
+                    {{ minValue:  -10, maxValue:  -5, label: "−10 to −5 pp",       symbol: {{ type: "simple-fill", color: [252,146,114, 160], outline: {{ width: 0 }} }} }},
+                    {{ minValue:   -5, maxValue:   0, label: "−5 to 0 pp",         symbol: {{ type: "simple-fill", color: [252,187,161, 140], outline: {{ width: 0 }} }} }},
+                    {{ minValue:    0, maxValue: 100, label: "≥ 0 pp (No decline)", symbol: {{ type: "simple-fill", color: [186,228,179, 130], outline: {{ width: 0 }} }} }}
+                  ]
+                }},
+                popupTemplate: {{
+                  title: "{{name}}",
+                  content: "Manufacturing share change (1991–2011): <b>{{mfg_decline}} pp</b>"
+                }}
+              }});
+              map.add(mfgLayer, 0); // insert below DCI layer
+            }});
+
+          view.ui.add(new LayerList({{ view: view }}), "top-right");
+          view.ui.add(new Legend({{ view: view }}), "bottom-left");
+          view.ui.add(new ScaleBar({{ view: view, unit: "dual" }}), "bottom-right");
+        }});
+      </script>
+    </body>
+    </html>
+    """
+
+components.html(
+    _arcgis_map_html(_county_url, _interstate_url, _state_hwy_url, _dci_url, _mfg_decline_json),
+    height=650,
+    scrolling=False,
+)
+st.caption(
+    "ArcGIS map · **Mfg. Decline** (county, red = larger decline) and "
+    "**Community Economic Distress Index** (census tract, yellow→red = more distressed) · "
+    "Interstates (red lines) · State Highways (amber lines) · Toggle layers via the LayerList panel."
+)
 
 # Styling constants
 ROBOTO = "Roboto, sans-serif"

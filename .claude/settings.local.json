@@ -5,7 +5,13 @@
       "Bash(start cmd:*)",
       "Bash(start powershell:*)",
       "Bash(python -c \"import pandas as pd; df=pd.read_csv\\(''cbp_county_2016.csv'', nrows=1\\); print\\(list\\(df.columns\\)\\)\")",
-      "Bash(python -c \"import pandas as pd; df=pd.read_csv\\(r''C:\\\\Users\\\\ja1644\\\\Documents\\\\GitHub\\\\adapt_test_viz\\\\cbp_county_2016.csv'', nrows=2\\); print\\(list\\(df.columns\\)\\)\")"
+      "Bash(python -c \"import pandas as pd; df=pd.read_csv\\(r''C:\\\\Users\\\\ja1644\\\\Documents\\\\GitHub\\\\adapt_test_viz\\\\cbp_county_2016.csv'', nrows=2\\); print\\(list\\(df.columns\\)\\)\")",
+      "Bash(python -:*)",
+      "Bash(python -c \":*)",
+      "Bash(/c/Users/ja1644/AppData/Local/anaconda3/Scripts/conda.exe env:*)",
+      "Bash(/c/Users/ja1644/AppData/Local/anaconda3/python.exe -c \":*)",
+      "WebFetch(domain:eig.org)",
+      "WebFetch(domain:services8.arcgis.com)"
     ]
   }
 }
