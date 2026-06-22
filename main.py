@@ -823,7 +823,7 @@ with _tab_general:
     with col2: cmetric("Public Sub-Bachelor's Graduates (2022)", f"{pub_subba_grads_2022:,.0f}")
 
     # Row 12: Private graduates by level (2022)
-    with col1: cmetric("Private 4-Year Graduates (2022)", f"{priv_fouryear_grads_2022:,.0f}")
+    with col2: cmetric("Private 4-Year Graduates (2022)", f"{priv_fouryear_grads_2022:,.0f}")
     with col2: cmetric("Private Sub-Bachelor's Graduates (2022)", f"{priv_subba_grads_2022:,.0f}")
 
 with _tab_compare:
