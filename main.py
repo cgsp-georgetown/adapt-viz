@@ -625,7 +625,7 @@ st.caption("Estimated job flows from changes in manufacturing import competition
 _trade_label = st.selectbox("Select metric", list(_TRADE_METRICS.keys()), key="trade_map_metric")
 _trade_col, _trade_cs, _ = _TRADE_METRICS[_trade_label]
 _trade_fig = _apply_zoom(_hide_ak_hi(build_trade_map(wide_df, _trade_col, _trade_cs)))
-st.plotly_chart(_trade_fig, use_container_width=True)
+st.plotly_chart(_trade_fig, use_container_width=True, key="trade_map")
 
 st.subheader("American Dream Potential Quintile by County")
 st.caption("Calculated by workforce investment and exposure to global trade. Compared to counties with similar population.")
@@ -676,11 +676,11 @@ if _valid and _county_qpop5 is not None:
     )
 
 st.subheader("American Dream Potential")
-st.plotly_chart(_national_fig, use_container_width=True)
+st.plotly_chart(_national_fig, use_container_width=True, key="national_map")
 
 st.subheader("Tradable Services")
 st.caption("Estimated jobs gained from tradable service exports. Use the dropdown on the map to filter by population quartile.")
-st.plotly_chart(_tradserv_fig, use_container_width=True)
+st.plotly_chart(_tradserv_fig, use_container_width=True, key="tradserv_map")
 
 
 st.divider()
@@ -901,7 +901,7 @@ st.caption("Values normalized to percentile rank within each population size gro
 _wage_label = st.selectbox("Select metric", list(_WAGE_METRICS.keys()), key="wage_map_metric")
 _wage_col, _ = _WAGE_METRICS[_wage_label]
 _wage_fig = _apply_zoom(_hide_ak_hi(build_wage_map(long_df, _wage_col)))
-st.plotly_chart(_wage_fig, use_container_width=True)
+st.plotly_chart(_wage_fig, use_container_width=True, key="wage_map")
 
 ### INDUSTRY TABLE
 county_cbp_df["l_m_dw_uswld_2023"] = county_cbp_df["l_m_dw_uswld_2023"].round(1)
@@ -1021,7 +1021,7 @@ fig_pie.update_layout(
     paper_bgcolor="#F4F4F4",
     margin=dict(t=60, b=20, l=20, r=220),
 )
-st.plotly_chart(fig_pie, width="stretch")
+st.plotly_chart(fig_pie, width="stretch", key="pie_chart")
 
 
 ### GRAPHS
@@ -1122,7 +1122,7 @@ def employment_trends(county_df):
         )
     )
 
-    st.plotly_chart(fig3,  width='stretch')
+    st.plotly_chart(fig3,  width='stretch', key="fig3_chart")
 
 employment_trends(county_long_df)
 
@@ -1215,7 +1215,7 @@ def county_dual_axis_chart(df):
         secondary_y=False
     )
 
-    st.plotly_chart(fig, width='stretch')
+    st.plotly_chart(fig, width='stretch', key="fig_chart")
 
 county_dual_axis_chart(county_long_df)
 
