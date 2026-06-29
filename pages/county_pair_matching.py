@@ -8,7 +8,7 @@ st.set_page_config(page_title="County Pair Matching", layout="wide")
 
 WIDE_DTA  = "county_all_vars_wide.dta"
 LONG_CSV  = "county_all_vars_long.csv"
-SIM_DTA   = r"C:\Users\ja1644\Documents\GitHub\adapt-viz\county_similarity_matrix.dta"
+SIM_DTA   = r"county_similarity_matrix.dta"
 
 CONT_SIM_VARS = [
     "mfg_empsh", "ag_empsh", "gov_empsh", "college_lf_share_1990",
