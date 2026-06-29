@@ -207,9 +207,9 @@ def build_pairs(pool, min_shock, min_ppupil_diff,
 
 st.title("County Pair Matching")
 st.caption(
-    "Identify county-pairs for comparison. Filter based on how close counties area." \
+    "Identify county-pairs for comparison. Filter based on how similar counties area." \
     " The goal is to identify counties that are similar in every way except for 1990 k-12 per-pupil deflated education spending." \
-    " We want see county-pairs where high-spenders outperform low-spenders." \
+    " We want to see county-pairs where high-spenders outperform low-spenders." \
     " Use 2000-2022 non-college employment growth (emp) and wage-growth (wage) as outcome metrics."
 )
 
@@ -225,7 +225,7 @@ with col1:
     has_shock = "d_m_usdev82000_2011" in pool.columns
     _shock_vals = pool["d_m_usdev82000_2011"].dropna() if has_shock else pd.Series([0.0, 5.0])
     min_shock = st.slider(
-        "Min China shock 2000–2011 (median =1)",
+        "Min import shock 2000–2011 (median =0.6)",
         min_value=0.0,
         max_value=float(_shock_vals.max()),
         value=1.0,
