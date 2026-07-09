@@ -3,12 +3,17 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+from dashboard_lib.paths import (
+    COUNTY_WIDE,
+    COUNTY_LONG_CSV,
+    SIMILARITY_MATRIX
+)
 
 st.set_page_config(page_title="County Pair Matching", layout="wide")
 
-WIDE_DTA  = "county_all_vars_wide.dta"
-LONG_CSV  = "county_all_vars_long.csv"
-SIM_DTA   = r"county_similarity_matrix.dta"
+# WIDE_DTA  = "county_all_vars_wide.dta"
+# LONG_CSV  = "county_all_vars_long.csv"
+# SIM_DTA   = r"county_similarity_matrix.dta"
 
 CONT_SIM_VARS = [
     "mfg_empsh", "ag_empsh", "gov_empsh", "college_lf_share_1990",
@@ -17,7 +22,7 @@ CONT_SIM_VARS = [
 
 @st.cache_data
 def load_timeseries():
-    long = pd.read_csv(LONG_CSV)
+    long = pd.read_csv(COUNTY_LONG_CSV)
     long = long[long["year"].between(1990, 2022)].copy()
     long["year"] = long["year"].astype(int)
     keep = ["countyid", "county_name", "year", "star_median", "star_pop"]
@@ -29,7 +34,7 @@ def load_timeseries():
 @st.cache_data
 def load_pool():
     # ── Wide: cross-sectional vars ────────────────────────────────────────
-    wide = pd.read_stata(WIDE_DTA)
+    wide = pd.read_stata(COUNTY_WIDE)
 
     ppupil_col = next(
         (c for c in ["ppupil_deflate_1990", "ppupil_deflate1990", "ppupil1990",
@@ -53,7 +58,7 @@ def load_pool():
         wide = wide.rename(columns={shock_col: "d_m_usdev82000_2011"})
 
     # ── Long: time-series vars pivoted ───────────────────────────────────
-    long = pd.read_csv(LONG_CSV)
+    long = pd.read_csv(COUNTY_LONG_CSV)
     long = long[long["year"].isin([1990, 2000, 2011, 2022])].copy()
     long["year"] = long["year"].astype(int)
 
@@ -72,7 +77,7 @@ def load_pool():
     piv = piv.reset_index()
 
     # ── Similarity matrix ─────────────────────────────────────────────────
-    sim = pd.read_stata(SIM_DTA)
+    sim = pd.read_stata(SIMILARITY_MATRIX)
     sim_keep = ["countyid"] + [c for c in CONT_SIM_VARS + ["RUCC_2013", "Description"] if c in sim.columns]
     sim = sim[sim_keep].copy()
 
