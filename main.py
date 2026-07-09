@@ -14,6 +14,7 @@ from plotly.subplots import make_subplots
 import math
 import json
 from urllib.request import urlopen
+from dashboard_lib import data
 
 st.set_page_config(page_title="Hello", page_icon="🚚",layout='wide')
 streamlit_style = """
@@ -30,33 +31,8 @@ st.markdown(streamlit_style, unsafe_allow_html=True)
 
 ### initialize all inputs/variables
 
-@st.cache_data  # This function will be cached to optimize loading
-def load_data():
-    path1 = "county_all_vars_wide.dta"
-    path2 = "county_all_vars_long.dta"
-    path3 = "cbp_county_2016.csv"
-    path4 = "cbp_county_2016_all_tradserv_emp.csv"
-    return pd.read_stata(path1), pd.read_stata(path2), pd.read_csv(path3), pd.read_csv(path4)
-
-@st.cache_data
-def load_grad_data():
-    df = pd.read_stata("county_panel_90001122.dta")
-    df2022 = df[df["year"] == 2022].copy()
-    df2022["county_fips"] = df2022["county_fips"].astype("Int64")
-    grads = df2022.groupby("county_fips").apply(
-        lambda g: pd.Series({
-            "pub_fouryear_grads_2022":  g.loc[g["college_label"].str.contains("public",  na=False) & (g["level"] == "4+ years"), "numbergraduates"].sum(),
-            "pub_subba_grads_2022":     g.loc[g["college_label"].str.contains("public",  na=False) & (g["level"] != "4+ years"), "numbergraduates"].sum(),
-            "priv_fouryear_grads_2022": g.loc[g["college_label"].str.contains("private", na=False) & (g["level"] == "4+ years"), "numbergraduates"].sum(),
-            "priv_subba_grads_2022":    g.loc[g["college_label"].str.contains("private", na=False) & (g["level"] != "4+ years"), "numbergraduates"].sum(),
-            "total_fouryear_grads_2022": g.loc[g["level"] == "4+ years", "numbergraduates"].sum(),
-            "total_subba_grads_2022":    g.loc[g["level"] != "4+ years", "numbergraduates"].sum(),
-        })
-    ).reset_index()
-    return grads
-
-national_df, long_df, cbp_df, tradserv_df = load_data()
-grad_df = load_grad_data()
+national_df, long_df, cbp_df, tradserv_df = data.load_data()
+grad_df = data.load_grad_data()
 
 _grad_map_cols = grad_df[["county_fips", "total_fouryear_grads_2022", "total_subba_grads_2022"]].copy()
 _grad_map_cols["county_fips"] = _grad_map_cols["county_fips"].astype(float)
