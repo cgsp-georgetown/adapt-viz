@@ -14,7 +14,14 @@ from plotly.subplots import make_subplots
 import math
 import json
 from urllib.request import urlopen
-from dashboard_lib import data
+from dashboard_lib.main_data import (
+    calculate_county_stats,
+    get_county_options,
+    get_state_options,
+    load_dashboard_data,
+    prepare_county_data,
+    rank_within_population_quintile,
+)
 
 st.set_page_config(page_title="Hello", page_icon="🚚",layout='wide')
 streamlit_style = """
@@ -31,74 +38,8 @@ st.markdown(streamlit_style, unsafe_allow_html=True)
 
 ### initialize all inputs/variables
 
-national_df, long_df, cbp_df, tradserv_df = data.load_data()
-grad_df = data.load_grad_data()
-
-_grad_map_cols = grad_df[["county_fips", "total_fouryear_grads_2022", "total_subba_grads_2022"]].copy()
-_grad_map_cols["county_fips"] = _grad_map_cols["county_fips"].astype(float)
-national_df = national_df.merge(_grad_map_cols, left_on="countyid", right_on="county_fips", how="left").drop(columns="county_fips")
-national_df["total_fouryear_grads_2022"] = national_df["total_fouryear_grads_2022"].fillna(0)
-national_df["total_subba_grads_2022"]    = national_df["total_subba_grads_2022"].fillna(0)
-_wap_col = next((c for c in ["total_workers2022", "total_workers", "employed_workers_2022"] if c in national_df.columns), None)
-if _wap_col:
-    national_df["fouryear_grads_per_wap_2022"] = national_df["total_fouryear_grads_2022"] / national_df[_wap_col].replace(0, float("nan"))
-    national_df["subba_grads_per_wap_2022"]    = national_df["total_subba_grads_2022"]    / national_df[_wap_col].replace(0, float("nan"))
-else:
-    national_df["fouryear_grads_per_wap_2022"] = float("nan")
-    national_df["subba_grads_per_wap_2022"]    = float("nan")
-
-# Remove CT planning regions (Census added these in 2022; not traditional counties)
-_ct_planning = national_df["county_name"].str.contains("Planning Region", case=False, na=False)
-national_df = national_df[~_ct_planning].copy()
-_ct_planning_long = long_df["county_name"].str.contains("Planning Region", case=False, na=False)
-long_df = long_df[~_ct_planning_long].copy()
-
-wide_df = national_df.copy()   # unfiltered wide data for national maps
-
-# Population quintile (5 groups) from workagepop for finer-grained peer comparisons
-if "workagepop" in wide_df.columns:
-    wide_df["qpop5"] = pd.qcut(
-        wide_df["workagepop"], q=5,
-        labels=["Quintile 1 (Smallest)", "Quintile 2", "Quintile 3",
-                "Quintile 4", "Quintile 5 (Largest)"],
-        duplicates="drop",
-    )
-else:
-    wide_df["qpop5"] = wide_df["qpop"]  # fallback to quartile
-
-# Pre-compute tradable services share of employment (2016) for all counties
-_total_emp_all    = cbp_df.groupby("countyid")["emp"].sum().rename("_total_emp_2016")
-_tradserv_emp_all = tradserv_df.groupby("countyid")["emp"].sum().rename("_tradserv_emp_2016")
-_tradserv_share   = (_tradserv_emp_all / _total_emp_all.replace(0, float("nan")) * 100).rename("tradserv_pct_2016")
-wide_df = wide_df.merge(_tradserv_share, left_on="countyid", right_index=True, how="left")
-wide_df = wide_df.merge(_total_emp_all, left_on="countyid", right_index=True, how="left")
-wide_df["_total_emp_2016"] = wide_df["_total_emp_2016"].replace(0, float("nan"))
-if "tradserv_exp_emp_2017_2022" in wide_df.columns and "_total_emp_2016" in wide_df.columns:
-    wide_df["tradserv_exp_pct_2016emp"] = (
-        wide_df["tradserv_exp_emp_2017_2022"].astype(float)
-        / wide_df["_total_emp_2016"].astype(float)
-        * 100
-    )
-else:
-    wide_df["tradserv_exp_pct_2016emp"] = float("nan")
-
-# % STARs in middle/upper income jobs (2022) from long panel
-if "pct_star_midupp" in long_df.columns:
-    _midupp_2022 = (
-        long_df[long_df["year"] == 2022]
-        .drop_duplicates(subset=["countyid"])[["countyid", "pct_star_midupp"]]
-        .rename(columns={"pct_star_midupp": "pct_star_midupp_2022"})
-    )
-    wide_df = wide_df.merge(_midupp_2022, on="countyid", how="left")
-
-default_state = "CA"
-default_county = "Los Angeles County, CA"
-
-sorted_states = np.sort(national_df['state'].unique())
-try:
-    default_index_st = int(np.where(sorted_states == default_state)[0][0])
-except IndexError:
-    default_index_st = 0
+national_df, long_df, cbp_df, tradserv_df, grad_df, wide_df = load_dashboard_data()
+sorted_states, default_index_st = get_state_options(national_df)
 
 # -----------------------------
 # State label constants & helpers
@@ -540,19 +481,20 @@ def build_trade_map(long_df_hash, metric_col, colorscale):
 
 st.sidebar.write('### Select County')
 state = st.sidebar.selectbox("State", sorted_states, index=default_index_st)
-national_df = national_df[national_df["state"] == state]
-
-sorted_counties = np.sort(national_df['county_name'].unique())
-try:
-    default_index_co = int(np.where(sorted_counties == default_county)[0][0])
-except IndexError:
-    default_index_co = 0
-
+state_df, sorted_counties, default_index_co = get_county_options(national_df, state)
 county = st.sidebar.selectbox("County", sorted_counties, index=default_index_co)
 
-county_df = national_df[national_df["county_name"]==county]
-county_long_df = long_df[long_df["county_name"]==county]
-county_id = county_df["countyid"].iloc[0]
+county_data = prepare_county_data(
+    state_df,
+    long_df,
+    cbp_df,
+    tradserv_df,
+    grad_df,
+    county,
+)
+county_df = county_data["county_df"]
+county_long_df = county_data["county_long_df"]
+county_id = county_data["county_id"]
 
 st.title("American Dream Achievability Progress Tracker")
 st.markdown('<p style="font-size:18px;">See the local geography of global opportunity. For local policymakers, employers, and citizens.</p>', unsafe_allow_html=True)
@@ -611,18 +553,13 @@ _county_row  = wide_df[wide_df["countyid"] == county_id]
 _county_qpop5 = _county_row["qpop5"].iloc[0] if len(_county_row) > 0 else None
 
 def _q5_rank(col, higher_is_better=True):
-    if col not in wide_df.columns or _county_qpop5 is None:
-        return None, None
-    bucket = wide_df[wide_df["qpop5"] == _county_qpop5][["countyid", col]].dropna(subset=[col])
-    n = len(bucket)
-    if n == 0:
-        return None, None
-    val_s = bucket[bucket["countyid"] == county_id][col]
-    if len(val_s) == 0:
-        return None, None
-    val = val_s.iloc[0]
-    rank = int((bucket[col] > val if higher_is_better else bucket[col] < val).sum()) + 1
-    return rank, n
+    return rank_within_population_quintile(
+        wide_df,
+        county_id,
+        _county_qpop5,
+        col,
+        higher_is_better,
+    )
 
 _rankings = [
     ("Potential",                     *_q5_rank("potential")),
@@ -661,70 +598,33 @@ st.plotly_chart(_tradserv_fig, use_container_width=True, key="tradserv_map")
 
 st.divider()
 
-county_cbp_df = cbp_df[(cbp_df["countyid"] == county_id)& (cbp_df['emp']> 1.)]
-_tradserv_row = tradserv_df[tradserv_df["countyid"] == county_id]
-tradserv_emp = _tradserv_row["emp"].iloc[0] if len(_tradserv_row) > 0 else 0
-total_emp_2016 = cbp_df[cbp_df["countyid"] == county_id]["emp"].sum()
-tradserv_pct = round(100 * tradserv_emp / total_emp_2016, 1) if total_emp_2016 > 0 else 0
+county_cbp_df = county_data["county_cbp_df"]
+tradserv_emp = county_data["tradserv_emp"]
+tradserv_pct = county_data["tradserv_pct"]
+mfg_emp_2016 = county_data["mfg_emp_2016"]
+mfg_pct_2016 = county_data["mfg_pct_2016"]
+total_jobs_2022 = county_data["total_jobs_2022"]
+college_jobs_2022 = county_data["college_jobs_2022"]
+noncollege_jobs_2022 = county_data["noncollege_jobs_2022"]
+pub_fouryear_grads_2022 = county_data["pub_fouryear_grads_2022"]
+pub_subba_grads_2022 = county_data["pub_subba_grads_2022"]
+priv_fouryear_grads_2022 = county_data["priv_fouryear_grads_2022"]
+priv_subba_grads_2022 = county_data["priv_subba_grads_2022"]
 
-_cbp_all = cbp_df[cbp_df["countyid"] == county_id]
-mfg_emp_2016 = round(_cbp_all[(_cbp_all["sic87dd"] >= 2000) & (_cbp_all["sic87dd"] <= 3999)]["emp"].sum(), 0)
-mfg_pct_2016 = round(100 * mfg_emp_2016 / total_emp_2016, 1) if total_emp_2016 > 0 else 0
-
-total_jobs_2022      = round(county_df["employed_workers_2022"].iloc[0], 0) if len(county_df) > 0 else 0
-college_jobs_2022    = round(county_df["employed_college2022"].iloc[0],  0) if len(county_df) > 0 else 0
-noncollege_jobs_2022 = round(county_df["employed_STARs_2022"].iloc[0],   0) if len(county_df) > 0 else 0
-
-_grad_row = grad_df[grad_df["county_fips"] == int(county_id)]
-if len(_grad_row) > 0:
-    pub_fouryear_grads_2022  = round(_grad_row["pub_fouryear_grads_2022"].iloc[0],  0)
-    pub_subba_grads_2022     = round(_grad_row["pub_subba_grads_2022"].iloc[0],     0)
-    priv_fouryear_grads_2022 = round(_grad_row["priv_fouryear_grads_2022"].iloc[0], 0)
-    priv_subba_grads_2022    = round(_grad_row["priv_subba_grads_2022"].iloc[0],    0)
-else:
-    pub_fouryear_grads_2022 = pub_subba_grads_2022 = priv_fouryear_grads_2022 = priv_subba_grads_2022 = 0
-
-# -----------------------------
-# Compute stats
-# -----------------------------
-def simple_stats(co_df):
-
-    star_wage    = round(co_df["star_median2022"].iloc[0],    0)
-    college_wage = round(co_df["college_median2022"].iloc[0], 0)
-
-    star_emp    = round(co_df["star_emp_rate_2022"].iloc[0],  2)
-    college_emp = round(co_df["emp_rate_college2022"].iloc[0], 2)
-
-    pct_educ2022    = round(100 * co_df["educ_pct_total_stloc2022"].iloc[0], 2)
-    ppupil_educ2022 = round(co_df["ppupil_deflate_2022"].iloc[0], 2)
-
-    job_loss     = round(co_df["pred_emp_loss"].iloc[0], 0)
-    job_gain     = round(co_df["pred_emp_gain"].iloc[0], 0)
-    pct_job_loss = round(co_df["pct_pred_emp_loss"].iloc[0] , 1)
-    pct_job_gain = round(co_df["pct_pred_emp_gain"].iloc[0] , 1)
-
-    mfgemp_loss = max(
-        0,
-        round(co_df["mfgemp2000"].iloc[0] - co_df["mfgemp2011"].iloc[0], 0)
-    )
-
-    serv_exp_job     = round(co_df["tradserv_exp_emp_2017_2022"].iloc[0], 0)
-    pct_serv_exp_job = round(co_df["tradserv_exp_pct_2016emp"].iloc[0], 2) if "tradserv_exp_pct_2016emp" in co_df.columns else None
-
-    return (
-        star_wage, college_wage, star_emp, college_emp,
-        pct_educ2022, ppupil_educ2022,
-        job_loss, job_gain, pct_job_loss, pct_job_gain, mfgemp_loss, serv_exp_job, pct_serv_exp_job
-    )
-
-stats = simple_stats(county_df)
-
-(
-    star_wage, all_wage, star_emp, college_emp,
-    pct_educ2022, ppupil_educ2022,
-    job_loss, job_gain, pct_job_loss, pct_job_gain, mfgemp_loss, serv_exp_job, pct_serv_exp_job
-) = stats
-
+stats = calculate_county_stats(county_df)
+star_wage = stats["star_wage"]
+all_wage = stats["college_wage"]
+star_emp = stats["star_emp"]
+college_emp = stats["college_emp"]
+pct_educ2022 = stats["pct_educ2022"]
+ppupil_educ2022 = stats["ppupil_educ2022"]
+job_loss = stats["job_loss"]
+job_gain = stats["job_gain"]
+pct_job_loss = stats["pct_job_loss"]
+pct_job_gain = stats["pct_job_gain"]
+mfgemp_loss = stats["mfgemp_loss"]
+serv_exp_job = stats["serv_exp_job"]
+pct_serv_exp_job = stats["pct_serv_exp_job"]
 
 
 # -----------------------------
@@ -1194,5 +1094,3 @@ def county_dual_axis_chart(df):
     st.plotly_chart(fig, width='stretch', key="fig_chart")
 
 county_dual_axis_chart(county_long_df)
-
-
