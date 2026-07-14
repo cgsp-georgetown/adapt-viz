@@ -153,41 +153,48 @@ def build_national_map(long_df_hash):
 
     counties_geojson = load_counties_geojson()
     all_groups = ["All"] + _QPOP_ORDER
-    traces = []
+    # Keep one GeoJSON-bearing trace. The former implementation created six
+    # traces for each population group, embedding the full county geometry 30
+    # times in the figure and in Streamlit's cache payload.
+    no_data = df["qpotential"].isna()
+    df.loc[no_data, "hover"] = (
+        df.loc[no_data, "county_name"].fillna("") + "<br>No data"
+    )
 
+    group_data = {}
     for group in all_groups:
         subset = df if group == "All" else df[df["qpop"] == group]
-        for q in [1, 2, 3, 4, 5]:
-            sub_q = subset[subset["qpotential"] == q]
-            traces.append(go.Choropleth(
-                geojson=counties_geojson,
-                locations=sub_q["fips"],
-                z=[q] * len(sub_q),
-                zmin=1, zmax=5,
-                colorscale=[[0, _Q_COLORS[q]], [1, _Q_COLORS[q]]],
-                showscale=False,
-                marker_line_width=0.15,
-                marker_line_color="white",
-                hovertext=sub_q["hover"],
-                hoverinfo="text",
-                showlegend=False,
-                visible=(group == "All"),
-            ))
-        sub_na = subset[subset["qpotential"].isna()]
-        traces.append(go.Choropleth(
-            geojson=counties_geojson,
-            locations=sub_na["fips"],
-            z=[0] * len(sub_na),
-            zmin=0, zmax=0,
-            colorscale=[[0, "#d9d9d9"], [1, "#d9d9d9"]],
-            showscale=False,
-            marker_line_width=0.15,
-            marker_line_color="white",
-            hovertext=sub_na["county_name"].fillna("") + "<br>No data",
-            hoverinfo="text",
-            showlegend=False,
-            visible=(group == "All"),
-        ))
+        group_data[group] = {
+            "locations": subset["fips"].tolist(),
+            "z": subset["qpotential"].fillna(0).tolist(),
+            "hovertext": subset["hover"].tolist(),
+        }
+
+    # Discrete colors for values 0 (no data) and quintiles 1 through 5.
+    colors = ["#d9d9d9"] + [_Q_COLORS[q] for q in range(1, 6)]
+    boundaries = [0.1, 0.3, 0.5, 0.7, 0.9]
+    colorscale = [[0.0, colors[0]]]
+    for index, boundary in enumerate(boundaries):
+        colorscale.extend(
+            [[boundary - 1e-6, colors[index]], [boundary, colors[index + 1]]]
+        )
+    colorscale.append([1.0, colors[-1]])
+
+    initial = group_data["All"]
+    traces = [go.Choropleth(
+        geojson=counties_geojson,
+        locations=initial["locations"],
+        z=initial["z"],
+        zmin=0,
+        zmax=5,
+        colorscale=colorscale,
+        showscale=False,
+        marker_line_width=0.15,
+        marker_line_color="white",
+        hovertext=initial["hovertext"],
+        hoverinfo="text",
+        showlegend=False,
+    )]
 
     # Permanent dummy traces for legend — always visible regardless of dropdown
     legend_items = list(_Q_LABELS.items()) + [("nd", "No Data")]
@@ -202,16 +209,22 @@ def build_national_map(long_df_hash):
             visible=True,
         ))
 
-    def vis_for(selected):
-        choropleth_vis = [group == selected for group in all_groups for _ in range(6)]
-        always_vis = [True] * len(legend_items)
-        return choropleth_vis + always_vis
-
-    buttons = [dict(
-        label="All Population Quartiles" if g == "All" else _QPOP_SHORT[g],
-        method="update",
-        args=[{"visible": vis_for(g)}],
-    ) for g in all_groups]
+    buttons = []
+    for group in all_groups:
+        payload = group_data[group]
+        buttons.append(dict(
+            label=(
+                "All Population Quartiles"
+                if group == "All"
+                else _QPOP_SHORT[group]
+            ),
+            method="restyle",
+            args=[{
+                "locations": [payload["locations"]],
+                "z": [payload["z"]],
+                "hovertext": [payload["hovertext"]],
+            }, [0]],
+        ))
 
     fig = go.Figure(data=traces)
     fig.update_layout(
@@ -290,38 +303,54 @@ def build_wage_map(long_df_hash, metric_col):
 
     counties_geojson = load_counties_geojson()
     all_groups = ["All"] + _QPOP_ORDER
-    traces = []
-
+    group_data = {}
     for group in all_groups:
         subset = df if group == "All" else df[df["qpop"] == group]
-        sub = subset.dropna(subset=["_norm"])
-        traces.append(go.Choropleth(
-            geojson=counties_geojson,
-            locations=sub["fips"],
-            z=sub["_norm"],
-            zmin=0, zmax=100,
-            colorscale="Blues",
-            colorbar=dict(
-                title=dict(
-                    text="Percentile within group",
-                    font=dict(size=11, color="black", family="Roboto, sans-serif"),
-                ),
-                tickfont=dict(size=10, color="black", family="Roboto, sans-serif"),
-                ticksuffix="th",
-                len=0.6,
-            ),
-            marker_line_width=0.15,
-            marker_line_color="white",
-            hovertext=sub["hover"],
-            hoverinfo="text",
-            visible=(group == "All"),
-        ))
+        subset = subset.dropna(subset=["_norm"])
+        group_data[group] = {
+            "locations": subset["fips"].tolist(),
+            "z": subset["_norm"].tolist(),
+            "hovertext": subset["hover"].tolist(),
+        }
 
-    buttons = [dict(
-        label="All Population Quartiles" if g == "All" else _QPOP_SHORT[g],
-        method="update",
-        args=[{"visible": [grp == g for grp in all_groups]}],
-    ) for g in all_groups]
+    initial = group_data["All"]
+    traces = [go.Choropleth(
+        geojson=counties_geojson,
+        locations=initial["locations"],
+        z=initial["z"],
+        zmin=0, zmax=100,
+        colorscale="Blues",
+        colorbar=dict(
+            title=dict(
+                text="Percentile within group",
+                font=dict(size=11, color="black", family="Roboto, sans-serif"),
+            ),
+            tickfont=dict(size=10, color="black", family="Roboto, sans-serif"),
+            ticksuffix="th",
+            len=0.6,
+        ),
+        marker_line_width=0.15,
+        marker_line_color="white",
+        hovertext=initial["hovertext"],
+        hoverinfo="text",
+    )]
+
+    buttons = []
+    for group in all_groups:
+        payload = group_data[group]
+        buttons.append(dict(
+            label=(
+                "All Population Quartiles"
+                if group == "All"
+                else _QPOP_SHORT[group]
+            ),
+            method="restyle",
+            args=[{
+                "locations": [payload["locations"]],
+                "z": [payload["z"]],
+                "hovertext": [payload["hovertext"]],
+            }, [0]],
+        ))
 
     fig = go.Figure(data=traces)
     fig.update_layout(
@@ -388,38 +417,55 @@ def build_trade_map(long_df_hash, metric_col, colorscale):
 
     counties_geojson = load_counties_geojson()
     all_groups = ["All"] + _QPOP_ORDER
-    traces = []
 
     zmin = 0
     zmax = df[metric_col].max()
 
+    group_data = {}
     for group in all_groups:
         subset = df if group == "All" else df[df["qpop"] == group]
-        sub = subset.dropna(subset=[metric_col])
-        traces.append(go.Choropleth(
-            geojson=counties_geojson,
-            locations=sub["fips"],
-            z=sub[metric_col],
-            zmin=zmin, zmax=zmax,
-            colorscale=colorscale,
-            colorbar=dict(
-                title=dict(text=col_label, font=dict(size=11, family="Roboto, sans-serif")),
-                tickfont=dict(size=10, family="Roboto, sans-serif"),
-                tickformat=".1f" if is_pct else ",.0f",
-                len=0.6,
-            ),
-            marker_line_width=0.15,
-            marker_line_color="white",
-            hovertext=sub["hover"],
-            hoverinfo="text",
-            visible=(group == "All"),
-        ))
+        subset = subset.dropna(subset=[metric_col])
+        group_data[group] = {
+            "locations": subset["fips"].tolist(),
+            "z": subset[metric_col].tolist(),
+            "hovertext": subset["hover"].tolist(),
+        }
 
-    buttons = [dict(
-        label="All Population Quartiles" if g == "All" else _QPOP_SHORT[g],
-        method="update",
-        args=[{"visible": [grp == g for grp in all_groups]}],
-    ) for g in all_groups]
+    initial = group_data["All"]
+    traces = [go.Choropleth(
+        geojson=counties_geojson,
+        locations=initial["locations"],
+        z=initial["z"],
+        zmin=zmin, zmax=zmax,
+        colorscale=colorscale,
+        colorbar=dict(
+            title=dict(text=col_label, font=dict(size=11, family="Roboto, sans-serif")),
+            tickfont=dict(size=10, family="Roboto, sans-serif"),
+            tickformat=".1f" if is_pct else ",.0f",
+            len=0.6,
+        ),
+        marker_line_width=0.15,
+        marker_line_color="white",
+        hovertext=initial["hovertext"],
+        hoverinfo="text",
+    )]
+
+    buttons = []
+    for group in all_groups:
+        payload = group_data[group]
+        buttons.append(dict(
+            label=(
+                "All Population Quartiles"
+                if group == "All"
+                else _QPOP_SHORT[group]
+            ),
+            method="restyle",
+            args=[{
+                "locations": [payload["locations"]],
+                "z": [payload["z"]],
+                "hovertext": [payload["hovertext"]],
+            }, [0]],
+        ))
 
     fig = go.Figure(data=traces)
     fig.update_layout(
