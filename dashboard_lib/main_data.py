@@ -2,6 +2,7 @@
 
 import numpy as np
 import pandas as pd
+import streamlit as st
 
 from . import data
 
@@ -10,8 +11,14 @@ DEFAULT_STATE = "CA"
 DEFAULT_COUNTY = "Los Angeles County, CA"
 
 
+@st.cache_resource
 def load_dashboard_data():
-    """Load source data and apply the dashboard's existing enrichments."""
+    """Load and prepare the dashboard's shared, read-only DataFrames once.
+
+    ``cache_resource`` intentionally returns the same DataFrame objects on each
+    Streamlit rerun. Callers must therefore treat these frames as immutable and
+    make a copy before changing their contents.
+    """
     national_df, long_df, cbp_df, tradserv_df = data.load_data()
     grad_df = data.load_grad_data()
     national_df, long_df, wide_df = prepare_national_data(

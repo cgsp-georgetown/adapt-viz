@@ -1,11 +1,12 @@
 """Geographic constants and Plotly map builders for the main dashboard."""
 
 import json
-from urllib.request import urlopen
 
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+
+from .paths import COUNTIES_GEOJSON
 
 
 # -----------------------------
@@ -82,10 +83,11 @@ _GEO_CONUS = dict(
 # -----------------------------
 # National qpotential map
 # -----------------------------
-@st.cache_data
+@st.cache_resource
 def load_counties_geojson():
-    with urlopen("https://raw.githubusercontent.com/plotly/datasets/master/geojson-counties-fips.json") as response:
-        return json.load(response)
+    """Load the shared county geometry from the repository, without network I/O."""
+    with COUNTIES_GEOJSON.open(encoding="utf-8") as geojson_file:
+        return json.load(geojson_file)
 
 @st.cache_data
 def get_county_centroids():
@@ -485,4 +487,3 @@ def apply_zoom(fig, zoom_geo):
     if zoom_geo:
         fig.update_geos(**zoom_geo)
     return fig
-

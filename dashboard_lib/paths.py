@@ -7,6 +7,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 DATA_DIR = ROOT / "data" 
 
+COUNTIES_GEOJSON = DATA_DIR / "geojson-counties-fips.json"
 COUNTY_WIDE = DATA_DIR / "county_all_vars_wide.dta"
 COUNTY_LONG_DTA = DATA_DIR / "county_all_vars_long.dta"
 COUNTY_LONG_CSV = DATA_DIR / "county_all_vars_long.csv"
