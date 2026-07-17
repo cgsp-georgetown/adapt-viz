@@ -19,9 +19,15 @@ st.set_page_config(page_title="Hello", page_icon="🚚", layout="wide")
 
 def main():
     apply_dashboard_style()
-    national_df, long_df, cbp_df, tradserv_df, grad_df, wide_df = (
-        load_dashboard_data()
-    )
+    (
+        national_df,
+        long_df,
+        cbp_df,
+        tradserv_df,
+        grad_df,
+        wide_df,
+        industry_county_df,
+    ) = load_dashboard_data()
     state_df, county = render_county_selector(national_df)
     county_data = prepare_county_data(
         state_df,
@@ -29,6 +35,7 @@ def main():
         cbp_df,
         tradserv_df,
         grad_df,
+        industry_county_df,
         county,
     )
     stats = calculate_county_stats(county_data["county_df"])

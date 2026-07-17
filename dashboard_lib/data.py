@@ -11,6 +11,7 @@ from .paths import (
     COLLEGE_PANEL,
     CZONE_COUNTY,
     SIMILARITY_MATRIX,
+    INDUSTRY_COUNTY_2022,
 )
 
 @st.cache_data  # This function will be cached to optimize loading
@@ -72,4 +73,13 @@ def load_grad_data():
     )
 
     return grads
+
+
+@st.cache_data
+def load_industry_county_data():
+    """Load the pre-aggregated 2022 county-by-industry worker estimates."""
+    return pd.read_csv(
+        INDUSTRY_COUNTY_2022,
+        dtype={"county_fips": "string"},
+    )
 

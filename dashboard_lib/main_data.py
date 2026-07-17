@@ -21,6 +21,7 @@ def load_dashboard_data():
     """
     national_df, long_df, cbp_df, tradserv_df = data.load_data()
     grad_df = data.load_grad_data()
+    industry_county_df = data.load_industry_county_data()
     national_df, long_df, wide_df = prepare_national_data(
         national_df,
         long_df,
@@ -28,7 +29,15 @@ def load_dashboard_data():
         tradserv_df,
         grad_df,
     )
-    return national_df, long_df, cbp_df, tradserv_df, grad_df, wide_df
+    return (
+        national_df,
+        long_df,
+        cbp_df,
+        tradserv_df,
+        grad_df,
+        wide_df,
+        industry_county_df,
+    )
 
 
 def prepare_national_data(national_df, long_df, cbp_df, tradserv_df, grad_df):
@@ -159,12 +168,17 @@ def prepare_county_data(
     cbp_df,
     tradserv_df,
     grad_df,
+    industry_county_df,
     county,
 ):
     """Select county frames and calculate county-level display values."""
     county_df = state_df[state_df["county_name"] == county]
     county_long_df = long_df[long_df["county_name"] == county]
     county_id = county_df["countyid"].iloc[0]
+    county_fips = f"{int(county_id):05d}"
+    county_industry_df = industry_county_df[
+        industry_county_df["county_fips"].eq(county_fips)
+    ].copy()
 
     county_cbp_df = cbp_df[
         (cbp_df["countyid"] == county_id) & (cbp_df["emp"] > 1.0)
@@ -227,6 +241,7 @@ def prepare_county_data(
         "county_df": county_df,
         "county_long_df": county_long_df,
         "county_id": county_id,
+        "county_industry_df": county_industry_df,
         "county_cbp_df": county_cbp_df,
         "tradserv_emp": tradserv_emp,
         "tradserv_pct": tradserv_pct,

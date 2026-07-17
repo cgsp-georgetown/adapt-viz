@@ -320,40 +320,72 @@ def render_wage_map(long_df, zoom_geo):
     st.plotly_chart(_wage_fig, use_container_width=True, key="wage_map")
 
 
-def render_industry_table(county_cbp_df, county_id):
-    ### INDUSTRY TABLE
-    county_cbp_df["l_m_dw_uswld_2023"] = county_cbp_df["l_m_dw_uswld_2023"].round(1)
-    st.subheader("Industries by Employment")
-    _table_cols = ["sic87dd_desc", "emp","l_m_dw_uswld_2023"]
-    industry_table = (
-        county_cbp_df[_table_cols]
-        .sort_values("emp", ascending=False)
-        .rename(columns={
-            "sic87dd_desc": "Industry",
-            "emp": "Employment",
-            "l_m_dw_uswld_2023": "Est. Imported Inputs Benefit (0-25)"
-        })
-        .reset_index(drop=True)
+def prepare_industry_table(county_industry_df):
+    """Prepare the selected county's 2022 industry estimates for display."""
+    display_columns = [
+        "Industry",
+        "Employment",
+        "Non-College Workers",
+        "Non-College Share (%)",
+    ]
+    if county_industry_df.empty:
+        return pd.DataFrame(columns=display_columns)
+
+    industry_table = county_industry_df[
+        ["industry", "employed_workers", "employed_noncollege"]
+    ].copy()
+    industry_table["employed_workers"] = pd.to_numeric(
+        industry_table["employed_workers"], errors="coerce"
     )
-    industry_table["Employment"] = industry_table["Employment"].apply(lambda x: f"{x:,.0f}")
+    industry_table["employed_noncollege"] = pd.to_numeric(
+        industry_table["employed_noncollege"], errors="coerce"
+    )
+    industry_table = industry_table[
+        industry_table["employed_workers"].notna()
+        & industry_table["employed_workers"].gt(0)
+    ].copy()
+    industry_table["noncollege_share"] = (
+        industry_table["employed_noncollege"]
+        / industry_table["employed_workers"]
+        * 100
+    )
+    industry_table = industry_table.sort_values(
+        "employed_workers", ascending=False, kind="stable"
+    ).rename(
+        columns={
+            "industry": "Industry",
+            "employed_workers": "Employment",
+            "employed_noncollege": "Non-College Workers",
+            "noncollege_share": "Non-College Share (%)",
+        }
+    )
+    return industry_table[display_columns].reset_index(drop=True)
 
-    # Faux columns seeded by county for consistency
-    _rng = np.random.default_rng(int(county_id) + 42)
-    n = len(industry_table)
-    industry_table["Non-College Workers ⚠"] = [f"{int(v):,}" for v in
-        county_cbp_df.sort_values("emp", ascending=False)["emp"].values * _rng.uniform(0.52, 0.82, n)]
-    growth = _rng.uniform(-9, 18, n)
-    industry_table["Job Growth (%) ⚠"] = [f"{v:+.1f}%" for v in growth]
-    unfilled = (
-        county_cbp_df.sort_values("emp", ascending=False)["emp"].values
-        * _rng.uniform(0.03, 0.13, n)
-    ).astype(int)
-    industry_table["Unfilled Positions ⚠"] = [f"{v:,}" for v in unfilled]
-    wages = _rng.integers(28000, 92000, n)
-    industry_table["Median Wage ⚠"] = [f"${v:,}" for v in wages]
 
-    st.dataframe(industry_table, width="stretch", hide_index=True)
-    st.caption("Using 2016 Employment, 2023 Imports, and 1992 Input-Output Table. ⚠ Columns marked ⚠ show illustrative placeholder data.")
+def render_industry_table(county_industry_df):
+    ### INDUSTRY TABLE
+    st.subheader("Industries by Employment")
+    industry_table = prepare_industry_table(county_industry_df)
+    if industry_table.empty:
+        st.info("No 2022 industry employment data is available for this county.")
+        return
+
+    st.dataframe(
+        industry_table.style.format(
+            {
+                "Employment": "{:,.0f}",
+                "Non-College Workers": "{:,.0f}",
+                "Non-College Share (%)": "{:.1f}%",
+            }
+        ),
+        width="stretch",
+        hide_index=True,
+    )
+    st.caption(
+        "2022 estimated employed workers by industry. Non-college workers "
+        "include workers without a four-year college degree. Values are "
+        "survey-weighted estimates and may not sum exactly due to rounding."
+    )
 
 
 def render_occupation_table(county_id):
@@ -651,7 +683,7 @@ def render_dashboard(wide_df, long_df, county, county_data, stats):
     render_map_sections(wide_df, long_df, county, county_id)
     render_county_overview(county, county_data, wide_df, county_id, stats)
     render_wage_map(long_df, zoom_geo)
-    render_industry_table(county_data["county_cbp_df"], county_id)
+    render_industry_table(county_data["county_industry_df"])
     render_occupation_table(county_id)
     render_industry_division(county_data["county_cbp_df"])
     render_trend_charts(county_long_df)
