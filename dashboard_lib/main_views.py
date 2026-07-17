@@ -388,42 +388,82 @@ def render_industry_table(county_industry_df):
     )
 
 
-def render_occupation_table(county_id):
-    ### OPPORTUNITY OCCUPATION TABLE
-    st.subheader("Non-College Educated Opportunity Occupations")
-
-    _OCC_DATA = [
-        ("Registered Nurse",         "Healthcare",  77_400, 6,   15, 12),
-        ("Heavy Truck Driver",        "Transportation / Warehousing", 48_300, 4,  85, 68),
-        ("Electrician",               "Construction / Manufacturing", 57_200, 11, 84, 41),
-        ("Software Developer",        "Professional Services / Finance", 121_000, 25, 9, 74),
-        ("Welder",                    "Manufacturing", 44_100, 3,  91, 79),
-        ("Construction Laborer",      "Construction", 38_600, 5,  90, 22),
-        ("Machinist",                 "Manufacturing", 47_300, 7,  86, 81),
-        ("Medical Assistant",         "Healthcare",  36_200, 16, 58, 8),
-        ("HVAC Technician",           "Construction / Building Services", 52_700, 9, 83, 30),
-        ("Logistics Coordinator",     "Wholesale Trade / Transportation", 50_100, 8, 72, 61),
-        ("Customer Service Rep",      "Retail / Finance / Healthcare", 35_800, -4, 69, 35),
-        ("Industrial Engineer",       "Manufacturing / Consulting", 92_000, 10, 18, 77),
+def prepare_occupation_table(county_occupation_df):
+    """Prepare leading county occupations for non-college workers."""
+    display_columns = [
+        "Occupation",
+        "Employment",
+        "Non-College Workers",
+        "Non-College Share (%)",
+        "Common Industries",
     ]
+    if county_occupation_df.empty:
+        return pd.DataFrame(columns=display_columns)
 
-    _occ_rng = np.random.default_rng(int(county_id) + 99)
-    occ_rows = []
-    for occ, industries, wage, growth_pct, noncoll_pct, global_pct in _OCC_DATA:
-        jobs_now = int(_occ_rng.integers(200, 4000))
-        occ_rows.append({
-            "Occupation":                     occ,
-            "Jobs (County Est.) ⚠":           f"{jobs_now:,}",
-            "Projected Growth (%) ⚠":         f"{growth_pct:+d}%",
-            "Common Industries":              industries,
-            "Median Wage ⚠":                  f"${wage:,}",
-            "% Non-College Workers ⚠":        f"{noncoll_pct}%",
-            "% in Globally Exposed Inds. ⚠":  f"{global_pct}%",
-        })
+    occupation_table = county_occupation_df[
+        [
+            "occupation",
+            "employed_workers",
+            "employed_noncollege",
+            "common_industries",
+        ]
+    ].copy()
+    occupation_table["employed_workers"] = pd.to_numeric(
+        occupation_table["employed_workers"], errors="coerce"
+    )
+    occupation_table["employed_noncollege"] = pd.to_numeric(
+        occupation_table["employed_noncollege"], errors="coerce"
+    )
+    occupation_table = occupation_table[
+        occupation_table["employed_workers"].gt(0)
+        & occupation_table["employed_noncollege"].gt(0)
+    ].copy()
+    occupation_table["noncollege_share"] = (
+        occupation_table["employed_noncollege"]
+        / occupation_table["employed_workers"]
+        * 100
+    )
+    occupation_table = occupation_table.sort_values(
+        ["employed_noncollege", "employed_workers", "occupation"],
+        ascending=[False, False, True],
+        kind="stable",
+    ).rename(
+            columns={
+                "occupation": "Occupation",
+                "employed_workers": "Employment",
+                "employed_noncollege": "Non-College Workers",
+                "noncollege_share": "Non-College Share (%)",
+                "common_industries": "Common Industries",
+            }
+    )
+    return occupation_table[display_columns].reset_index(drop=True)
 
-    occ_df = pd.DataFrame(occ_rows)
-    st.dataframe(occ_df, width="stretch", hide_index=True)
-    st.caption("⚠ Columns marked ⚠ show illustrative placeholder data.")
+
+def render_occupation_table(county_occupation_df):
+    ### OPPORTUNITY OCCUPATION TABLE
+    st.subheader("Leading Occupations for Non-College Workers")
+    occupation_table = prepare_occupation_table(county_occupation_df)
+    if occupation_table.empty:
+        st.info("No 2022 occupation employment data is available for this county.")
+        return
+
+    st.dataframe(
+        occupation_table.style.format(
+            {
+                "Employment": "{:,.0f}",
+                "Non-College Workers": "{:,.0f}",
+                "Non-College Share (%)": "{:.1f}%",
+            }
+        ),
+        width="stretch",
+        hide_index=True,
+    )
+    st.caption(
+        "Occupations ranked by estimated non-college employment in "
+        "2022. Common industries are the three leading county industries for "
+        "each occupation, ranked by non-college employment. Values are "
+        "survey-weighted estimates."
+    )
 
 
 def render_industry_division(county_cbp_df):
@@ -684,6 +724,6 @@ def render_dashboard(wide_df, long_df, county, county_data, stats):
     render_county_overview(county, county_data, wide_df, county_id, stats)
     render_wage_map(long_df, zoom_geo)
     render_industry_table(county_data["county_industry_df"])
-    render_occupation_table(county_id)
+    render_occupation_table(county_data["county_occupation_df"])
     render_industry_division(county_data["county_cbp_df"])
     render_trend_charts(county_long_df)

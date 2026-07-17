@@ -22,6 +22,7 @@ def load_dashboard_data():
     national_df, long_df, cbp_df, tradserv_df = data.load_data()
     grad_df = data.load_grad_data()
     industry_county_df = data.load_industry_county_data()
+    occupation_county_df = data.load_occupation_county_data()
     national_df, long_df, wide_df = prepare_national_data(
         national_df,
         long_df,
@@ -37,6 +38,7 @@ def load_dashboard_data():
         grad_df,
         wide_df,
         industry_county_df,
+        occupation_county_df,
     )
 
 
@@ -169,6 +171,7 @@ def prepare_county_data(
     tradserv_df,
     grad_df,
     industry_county_df,
+    occupation_county_df,
     county,
 ):
     """Select county frames and calculate county-level display values."""
@@ -178,6 +181,9 @@ def prepare_county_data(
     county_fips = f"{int(county_id):05d}"
     county_industry_df = industry_county_df[
         industry_county_df["county_fips"].eq(county_fips)
+    ].copy()
+    county_occupation_df = occupation_county_df[
+        occupation_county_df["county_fips"].eq(county_fips)
     ].copy()
 
     county_cbp_df = cbp_df[
@@ -242,6 +248,7 @@ def prepare_county_data(
         "county_long_df": county_long_df,
         "county_id": county_id,
         "county_industry_df": county_industry_df,
+        "county_occupation_df": county_occupation_df,
         "county_cbp_df": county_cbp_df,
         "tradserv_emp": tradserv_emp,
         "tradserv_pct": tradserv_pct,

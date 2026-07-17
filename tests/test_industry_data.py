@@ -6,7 +6,8 @@ from scripts.build_2022_industry_summary import (
     normalize_county_fips,
     validate_summary,
 )
-from dashboard_lib.main_views import prepare_industry_table
+from dashboard_lib.main_views import prepare_industry_table, prepare_occupation_table
+from scripts.build_2022_industry_summary import select_common_industries
 
 
 def test_normalize_county_fips():
@@ -104,3 +105,43 @@ def test_prepare_industry_table_handles_empty_input():
         "Non-College Workers",
         "Non-College Share (%)",
     ]
+
+
+def test_select_common_industries_uses_noncollege_employment():
+    detailed = pd.DataFrame(
+        {
+            "county_fips": ["06037"] * 4,
+            "occupation_code": ["1110XX"] * 4,
+            "occupation": ["Example"] * 4,
+            "industry": ["Fourth", "First", "Third", "Second"],
+            "employed_workers": [500.0, 100.0, 300.0, 200.0],
+            "employed_noncollege": [5.0, 40.0, 20.0, 30.0],
+        }
+    )
+
+    result = select_common_industries(detailed)
+
+    assert result.iloc[0]["common_industries"] == "First · Second · Third"
+
+
+def test_prepare_occupation_table_ranks_and_calculates_share():
+    county_data = pd.DataFrame(
+        {
+            "occupation": ["Smaller", "Larger", "No non-college"],
+            "employed_workers": [100.0, 400.0, 50.0],
+            "employed_noncollege": [25.0, 240.0, 0.0],
+            "common_industries": ["A", "B · C", "D"],
+        }
+    )
+
+    result = prepare_occupation_table(county_data)
+
+    assert result.columns.tolist() == [
+        "Occupation",
+        "Employment",
+        "Non-College Workers",
+        "Non-College Share (%)",
+        "Common Industries",
+    ]
+    assert result["Occupation"].tolist() == ["Larger", "Smaller"]
+    assert result["Non-College Share (%)"].tolist() == [60.0, 25.0]

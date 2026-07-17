@@ -12,6 +12,7 @@ from .paths import (
     CZONE_COUNTY,
     SIMILARITY_MATRIX,
     INDUSTRY_COUNTY_2022,
+    OCCUPATION_COUNTY_2022,
 )
 
 @st.cache_data  # This function will be cached to optimize loading
@@ -81,5 +82,18 @@ def load_industry_county_data():
     return pd.read_csv(
         INDUSTRY_COUNTY_2022,
         dtype={"county_fips": "string"},
+    )
+
+
+@st.cache_data
+def load_occupation_county_data():
+    """Load the pre-aggregated 2022 county-by-occupation worker estimates."""
+    return pd.read_csv(
+        OCCUPATION_COUNTY_2022,
+        dtype={
+            "county_fips": "string",
+            "occupation_code": "string",
+        },
+        keep_default_na=False,
     )
 

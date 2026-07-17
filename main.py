@@ -27,6 +27,7 @@ def main():
         grad_df,
         wide_df,
         industry_county_df,
+        occupation_county_df,
     ) = load_dashboard_data()
     state_df, county = render_county_selector(national_df)
     county_data = prepare_county_data(
@@ -36,6 +37,7 @@ def main():
         tradserv_df,
         grad_df,
         industry_county_df,
+        occupation_county_df,
         county,
     )
     stats = calculate_county_stats(county_data["county_df"])
