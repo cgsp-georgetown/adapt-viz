@@ -3,7 +3,7 @@
 import pandas as pd
 import streamlit as st
 
-from .paths import COUNTY_LONG_CSV, COUNTY_WIDE, SIMILARITY_MATRIX
+from .paths import COUNTY_LONG_CSV, COUNTY_PAIRS_2015, COUNTY_WIDE, SIMILARITY_MATRIX
 
 
 CONT_SIM_VARS = [
@@ -25,6 +25,41 @@ def classify_recovery(row):
     if inc:
         return "inc"
     return "loss"
+
+
+@st.cache_data
+def load_similarity_matches():
+    """Load the precomputed RUCC/economic-type/education/labor-force county matches."""
+    return pd.read_csv(COUNTY_PAIRS_2015)
+
+
+@st.cache_data
+def load_shock_percentiles():
+    """Load each county's 2000-2011 China import shock exposure and national percentile."""
+    wide = pd.read_stata(COUNTY_WIDE)
+    shock_col = next(
+        (
+            column
+            for column in ["d_m_usdev82000_2011", "d_m_usdev8_2000_2011"]
+            if column in wide.columns
+        ),
+        None,
+    )
+    if shock_col is None:
+        return pd.DataFrame(columns=["countyid", "china_shock", "china_shock_pct"])
+
+    shock = wide[["countyid", shock_col]].rename(columns={shock_col: "china_shock"})
+    shock["china_shock_pct"] = shock["china_shock"].rank(pct=True) * 100
+    return shock
+
+
+@st.cache_data
+def load_ppupil_spending():
+    """Load each county's deflated per-pupil K-12 spending for 1990 and 2022."""
+    wide = pd.read_stata(COUNTY_WIDE, columns=["countyid", "ppupil_deflate", "ppupil_deflate_2022"])
+    return wide.rename(
+        columns={"ppupil_deflate": "ppupil_1990", "ppupil_deflate_2022": "ppupil_2022"}
+    )
 
 
 @st.cache_data

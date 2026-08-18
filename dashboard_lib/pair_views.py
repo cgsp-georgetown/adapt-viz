@@ -45,6 +45,304 @@ def render_page_header():
     )
 
 
+MATCH_TIER_LABELS = {
+    "rucc_econtype_lowed": "Same RUCC, economic type & education level",
+    "rucc_econtype_lowed_dropped": "Same RUCC & economic type (education level relaxed)",
+    "econtype_only_nearest_rucc_pop": "Same economic type, nearest RUCC (education & exact RUCC relaxed)",
+}
+
+MEMBER_COLORS = ["#1f77b4", "#ff7f0e", "#2ca02c"]
+
+
+def _match_members(row):
+    members = []
+    for slot in (1, 2, 3):
+        cid = row.get(f"countyid_{slot}")
+        if pd.isna(cid):
+            continue
+        members.append(
+            {
+                "countyid": int(cid),
+                "name": row.get(f"County_name_{slot}"),
+                "state": row.get(f"State_{slot}"),
+                "total_workers2022": row.get(f"total_workers2022_{slot}"),
+            }
+        )
+    return members
+
+
+def _closest_member_pair(members, anchor_countyid):
+    """Reduce a matched group to just the anchor county and its single closest peer.
+
+    Groups larger than 2 (trios) share one match among three counties, but a
+    given county's own closest peer within that trio is whichever other
+    member has the nearest total_workers2022 (labor force size).
+    """
+    if len(members) <= 2:
+        return members
+
+    anchor = next(m for m in members if m["countyid"] == anchor_countyid)
+    others = [m for m in members if m["countyid"] != anchor_countyid]
+    anchor_workers = anchor.get("total_workers2022")
+
+    if pd.notna(anchor_workers):
+        others = sorted(
+            others,
+            key=lambda m: abs(m["total_workers2022"] - anchor_workers)
+            if pd.notna(m.get("total_workers2022"))
+            else float("inf"),
+        )
+    return [anchor, others[0]]
+
+
+def render_similarity_match_intro():
+    st.subheader("Pre-matched counties: similar peers by RUCC, industry & size")
+    st.caption(
+        "Each county below is matched to its closest peer(s): same 2013 rural-urban continuum code (RUCC),"
+        " the same dominant economic type (farming, mining, manufacturing, government, recreation, or"
+        " nonspecialized), and the same low-education flag, choosing whichever candidate has the closest"
+        " total workforce size (2022). When no exact match exists, the education requirement is relaxed first,"
+        " then the RUCC requirement (matched to the nearest RUCC and closest workforce size instead)."
+    )
+
+
+def build_multi_county_wage_figure(series, names):
+    figure = go.Figure()
+    _add_import_shock_marker(figure)
+    for i, (timeseries, name) in enumerate(zip(series, names)):
+        if "star_median" not in timeseries.columns:
+            continue
+        figure.add_trace(
+            go.Scatter(
+                x=timeseries["year"],
+                y=timeseries["star_median"],
+                name=name,
+                line=dict(color=MEMBER_COLORS[i % len(MEMBER_COLORS)], width=2),
+            )
+        )
+    figure.update_yaxes(
+        tickprefix="$",
+        tickformat=",.0f",
+        tickfont=dict(size=15),
+        title_font=dict(size=16),
+    )
+    figure.update_xaxes(range=[1990, 2022], tickfont=dict(size=15))
+    figure.update_layout(
+        title="Median Non-College Wage",
+        height=480,
+        margin=dict(t=90, b=50),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="left",
+            x=0,
+            font=dict(size=16),
+        ),
+        font=dict(size=16),
+        title_font=dict(size=20),
+    )
+    return figure
+
+
+def build_multi_county_employment_figure(series, names):
+    figure = go.Figure()
+    _add_import_shock_marker(figure)
+    for i, (timeseries, name) in enumerate(zip(series, names)):
+        if "star_pop" not in timeseries.columns:
+            continue
+        figure.add_trace(
+            go.Scatter(
+                x=timeseries["year"],
+                y=timeseries["star_pop"],
+                name=name,
+                line=dict(color=MEMBER_COLORS[i % len(MEMBER_COLORS)], width=2),
+                hovertemplate="%{x}: %{y:.2f}<extra>" + name + "</extra>",
+            )
+        )
+    figure.update_yaxes(
+        ticksuffix="%",
+        title_text="Employment-Population Ratio",
+        tickfont=dict(size=15),
+        title_font=dict(size=16),
+    )
+    figure.update_xaxes(range=[1990, 2022], tickfont=dict(size=15))
+    figure.update_layout(
+        title="Non-College Employment-Population Ratio",
+        height=480,
+        margin=dict(t=90, b=50),
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="left",
+            x=0,
+            font=dict(size=16),
+        ),
+        font=dict(size=16),
+        title_font=dict(size=20),
+    )
+    return figure
+
+
+HIGH_SHOCK_PCT_THRESHOLD = 75
+
+
+def build_county_lookup(matches_df, shock_df, ppupil_df=None):
+    """Long table of one row per matched county: countyid, name, state, its match_id, shock pct."""
+    records = []
+    for _, row in matches_df.iterrows():
+        for member in _match_members(row):
+            records.append(
+                {
+                    "countyid": member["countyid"],
+                    "County_name": member["name"],
+                    "State": member["state"],
+                    "match_id": row["match_id"],
+                }
+            )
+    lookup = pd.DataFrame(records)
+    if not shock_df.empty:
+        lookup = lookup.merge(shock_df, on="countyid", how="left")
+    else:
+        lookup["china_shock"] = pd.NA
+        lookup["china_shock_pct"] = pd.NA
+    if ppupil_df is not None and not ppupil_df.empty:
+        lookup = lookup.merge(ppupil_df, on="countyid", how="left")
+    else:
+        lookup["ppupil_1990"] = pd.NA
+        lookup["ppupil_2022"] = pd.NA
+    return lookup
+
+
+def _format_currency(value):
+    if pd.isna(value):
+        return "n/a"
+    return f"${value:,.0f}"
+
+
+def render_similarity_matches(matches_df, timeseries, shock_df, ppupil_df=None):
+    render_similarity_match_intro()
+
+    if matches_df.empty:
+        st.info("No pre-matched counties found.")
+        return
+
+    county_lookup = build_county_lookup(matches_df, shock_df, ppupil_df)
+
+    has_shock = county_lookup["china_shock_pct"].notna().any()
+    high_shock_only = st.checkbox(
+        "Only show counties with high China shock exposure "
+        f"(above {HIGH_SHOCK_PCT_THRESHOLD}th percentile, 2000–2011)",
+        value=False,
+        disabled=not has_shock,
+        help="Not available in this dataset." if not has_shock else "",
+        key="similarity_high_shock_only",
+    )
+    filtered = (
+        county_lookup[county_lookup["china_shock_pct"] > HIGH_SHOCK_PCT_THRESHOLD]
+        if high_shock_only
+        else county_lookup
+    )
+
+    if filtered.empty:
+        st.info("No counties match this filter.")
+        return
+
+    select_col1, select_col2 = st.columns(2)
+    with select_col1:
+        states = sorted(filtered["State"].dropna().unique())
+        state = st.selectbox("State", states, key="similarity_state_select")
+    with select_col2:
+        state_counties = filtered[filtered["State"] == state].sort_values("County_name")
+        county_ids = state_counties["countyid"].tolist()
+        name_lookup = dict(zip(state_counties["countyid"], state_counties["County_name"]))
+        selected_countyid = st.selectbox(
+            "County",
+            county_ids,
+            format_func=lambda cid: name_lookup[cid],
+            key="similarity_county_select",
+        )
+
+    match_id = county_lookup.loc[county_lookup["countyid"] == selected_countyid, "match_id"].iloc[0]
+    selected_row = matches_df[matches_df["match_id"] == match_id].iloc[0]
+    members = _closest_member_pair(_match_members(selected_row), selected_countyid)
+
+    tier_label = MATCH_TIER_LABELS.get(selected_row.get("match_tier"), selected_row.get("match_tier"))
+    st.markdown(
+        f"**Match basis:** {tier_label}  \n"
+        f"**RUCC 2013:** {selected_row.get('RUCC_2013')} &nbsp;&nbsp; "
+        f"**Economic type:** {selected_row.get('Economic_Type_Label')}"
+    )
+
+    if has_shock:
+        shock_cols = st.columns(len(members))
+        for column, member in zip(shock_cols, members):
+            pct = county_lookup.loc[county_lookup["countyid"] == member["countyid"], "china_shock_pct"]
+            with column:
+                st.metric(
+                    f"{member['name']}, {member['state']} — China shock percentile",
+                    f"{pct.iloc[0]:.0f}th" if not pct.empty and pd.notna(pct.iloc[0]) else "n/a",
+                )
+
+    has_ppupil = county_lookup["ppupil_1990"].notna().any() or county_lookup["ppupil_2022"].notna().any()
+    if has_ppupil:
+        st.markdown("**Per-pupil K-12 spending (deflated $)**")
+        ppupil_cols = st.columns(len(members))
+        for column, member in zip(ppupil_cols, members):
+            member_row = county_lookup[county_lookup["countyid"] == member["countyid"]]
+            ppupil_1990 = member_row["ppupil_1990"].iloc[0] if not member_row.empty else None
+            ppupil_2022 = member_row["ppupil_2022"].iloc[0] if not member_row.empty else None
+            with column:
+                st.markdown(
+                    f"**{member['name']}, {member['state']}**  \n"
+                    f"1990: {_format_currency(ppupil_1990)} &nbsp;&nbsp; "
+                    f"2022: {_format_currency(ppupil_2022)}"
+                )
+
+    series = []
+    names = []
+    for member in members:
+        county_ts = timeseries[timeseries["countyid"] == member["countyid"]].sort_values("year")
+        series.append(county_ts)
+        names.append(f"{member['name']}, {member['state']}")
+
+    st.plotly_chart(
+        build_multi_county_wage_figure(series, names),
+        use_container_width=True,
+        key="similarity_wage_chart",
+    )
+    st.plotly_chart(
+        build_multi_county_employment_figure(series, names),
+        use_container_width=True,
+        key="similarity_emp_chart",
+    )
+    render_drop_and_rebound_multi(series, names)
+
+
+def render_drop_and_rebound_multi(series, names):
+    valid = [(ts, name) for ts, name in zip(series, names) if "star_pop" in ts.columns]
+    if not valid:
+        return
+
+    st.divider()
+    st.markdown("#### Non-College Employment-Population: Drop & Rebound")
+    columns = st.columns(len(valid))
+    for column, (timeseries, name) in zip(columns, valid):
+        values = calculate_drop_and_rebound(timeseries)
+        if values is None:
+            continue
+        with column:
+            st.markdown(f"**{name}**")
+            st.markdown(
+                f"- **2000 value:** {values['value_2000']:.2f}  \n"
+                f"- **Trough:** {values['trough']:.2f} (year {values['trough_year']})  \n"
+                f"- **Drop (2000 → trough):** {values['drop']:+.2f}  \n"
+                f"- **Rebound (trough → 2022):** {values['rebound']:+.2f}  \n"
+                f"- **Net change (2000 → 2022):** {values['net_change']:+.2f}"
+            )
+
+
 def render_pair_filters(pool):
     has_sim = any(variable in pool.columns for variable in CONT_SIM_VARS)
     has_rucc = "RUCC_2013" in pool.columns
